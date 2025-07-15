@@ -39,16 +39,24 @@
             color: #ccc;
         }
         
-        #gameOver {
+        #gameOver, #mainMenu {
             position: absolute;
             top: 50%;
             left: 50%;
             transform: translate(-50%, -50%);
-            background: rgba(0, 0, 0, 0.8);
+            background: rgba(0, 0, 0, 0.9);
             padding: 30px;
             border-radius: 10px;
             text-align: center;
+            border: 2px solid #007bff;
+        }
+        
+        #gameOver {
             display: none;
+        }
+        
+        #mainMenu {
+            display: block;
         }
         
         button {
@@ -59,11 +67,67 @@
             font-size: 16px;
             border-radius: 5px;
             cursor: pointer;
-            margin-top: 10px;
+            margin: 5px;
         }
         
         button:hover {
             background: #0056b3;
+        }
+        
+        .difficulty-btn {
+            display: block;
+            width: 200px;
+            margin: 10px auto;
+        }
+        
+        .difficulty-btn.easy {
+            background: #28a745;
+        }
+        
+        .difficulty-btn.normal {
+            background: #ffc107;
+            color: #000;
+        }
+        
+        .difficulty-btn.hard {
+            background: #dc3545;
+        }
+        
+        .difficulty-btn.easy:hover {
+            background: #218838;
+        }
+        
+        .difficulty-btn.normal:hover {
+            background: #e0a800;
+        }
+        
+        .difficulty-btn.hard:hover {
+            background: #c82333;
+        }
+        
+        #settingsPanel {
+            margin-top: 20px;
+            padding: 20px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+        }
+        
+        #musicControls {
+            margin-top: 15px;
+        }
+        
+        #musicControls label {
+            display: block;
+            margin: 10px 0;
+        }
+        
+        #musicFile {
+            margin: 10px 0;
+        }
+        
+        .current-difficulty {
+            color: #00ff00;
+            font-weight: bold;
         }
     </style>
 </head>
@@ -72,27 +136,89 @@
         <canvas id="gameCanvas" width="800" height="600"></canvas>
         <div id="gameInfo">
             <div>スコア: <span id="score">0</span></div>
+            <div>難易度: <span id="currentDifficulty" class="current-difficulty">ノーマル</span></div>
             <div>ライフ: <span id="lives">3</span></div>
         </div>
         <div id="controls">
-            矢印キー: 移動 | スペースキー: 射撃 | R: リスタート
+            矢印キー: 移動 | スペースキー: 射撃 | R: リスタート | ESC: メニュー
         </div>
+        
+        <div id="mainMenu">
+            <h1> 宇宙シューティングゲーム</h1>
+            <h3>難易度を選択してください</h3>
+            
+            <button class="difficulty-btn easy" onclick="startGame('easy')">
+                 イージー<br>
+                <small>初心者向け - 敵の動きが遅く、出現頻度も低い</small>
+            </button>
+            
+            <button class="difficulty-btn normal" onclick="startGame('normal')">
+                 ノーマル<br>
+                <small>中級者向け - バランスの取れた難易度</small>
+            </button>
+            
+            <button class="difficulty-btn hard" onclick="startGame('hard')">
+                 ハード<br>
+                <small>上級者向け - 敵が高速で大量に出現</small>
+            </button>
+            
+            <div id="settingsPanel">
+                <h4>⚙️ 設定</h4>
+                <div id="musicControls">
+                    <label>
+                        <input type="checkbox" id="enableMusic" checked> BGMを有効にする
+                    </label>
+                </div>
+            </div>
+        </div>
+        
         <div id="gameOver">
-            <h2>ゲームオーバー</h2>
+            <h2> ゲームオーバー</h2>
             <p>最終スコア: <span id="finalScore">0</span></p>
+            <p>難易度: <span id="finalDifficulty"></span></p>
             <button onclick="restartGame()">もう一度プレイ</button>
+            <button onclick="showMainMenu()">メニューに戻る</button>
         </div>
     </div>
+
+    <audio id="bgmAudio" loop src="music/シューティングゲームBGM.mp3"></audio>
 
     <script>
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
+        const bgmAudio = document.getElementById('bgmAudio');
         
         // ゲーム状態
-        let gameState = 'playing';
+        let gameState = 'menu';
         let score = 0;
         let lives = 3;
         let keys = {};
+        let currentDifficulty = 'normal';
+        
+        // 難易度設定
+        const difficultySettings = {
+            easy: {
+                name: 'イージー',
+                enemySpawnRate: 90,      // 敵の出現間隔（フレーム）
+                enemySpeed: { min: 1, max: 2 },
+                enemySpawnCount: 1,      // 一度に出現する敵の数
+                maxEnemies: 3           // 画面上の最大敵数
+            },
+            normal: {
+                name: 'ノーマル',
+                enemySpawnRate: 60,
+                enemySpeed: { min: 2, max: 3 },
+                enemySpawnCount: 1,
+                maxEnemies: 5
+            },
+            hard: {
+                name: 'ハード',
+                enemySpawnRate: 30,
+                enemySpeed: { min: 3, max: 5 },
+                enemySpawnCount: 2,
+                maxEnemies: 8
+            }
+        };
         
         // プレイヤー
         const player = {
@@ -111,6 +237,9 @@
         // 敵の生成タイマー
         let enemySpawnTimer = 0;
         
+        // BGM関連
+        let musicEnabled = true;
+        
         // キーイベント
         document.addEventListener('keydown', (e) => {
             keys[e.key] = true;
@@ -121,11 +250,68 @@
             if (e.key === 'r' || e.key === 'R') {
                 restartGame();
             }
+            if (e.key === 'Escape') {
+                if (gameState === 'playing') {
+                    showMainMenu();
+                }
+            }
         });
         
         document.addEventListener('keyup', (e) => {
             keys[e.key] = false;
         });
+        
+        // 音楽の切り替え
+        document.getElementById('enableMusic').addEventListener('change', function() {
+            musicEnabled = this.checked;
+            if (musicEnabled) {
+                playBGM();
+            } else {
+                stopBGM();
+            }
+        });
+        
+        // BGM再生
+        function playBGM() {
+            if (musicEnabled) {
+                bgmAudio.play().catch(e => console.log("BGMの再生に失敗しました:", e));
+            }
+        }
+        
+        // BGM停止
+        function stopBGM() {
+            bgmAudio.pause();
+            bgmAudio.currentTime = 0;
+        }
+        
+        // ゲーム開始
+        function startGame(difficulty) {
+            currentDifficulty = difficulty;
+            gameState = 'playing';
+            score = 0;
+            lives = 3;
+            bullets = [];
+            enemies = [];
+            particles = [];
+            enemySpawnTimer = 0;
+            player.x = canvas.width / 2;
+            player.y = canvas.height - 50;
+            
+            document.getElementById('mainMenu').style.display = 'none';
+            document.getElementById('gameOver').style.display = 'none';
+            
+            musicEnabled = document.getElementById('enableMusic').checked;
+            updateUI();
+            playBGM();
+        }
+        
+        // メインメニュー表示
+        function showMainMenu() {
+            gameState = 'menu';
+            document.getElementById('mainMenu').style.display = 'block';
+            document.getElementById('gameOver').style.display = 'none';
+            stopBGM();
+        }
         
         // 弾を発射
         function shoot() {
@@ -143,14 +329,21 @@
         
         // 敵を生成
         function spawnEnemy() {
-            enemies.push({
-                x: Math.random() * (canvas.width - 30),
-                y: -30,
-                width: 30,
-                height: 30,
-                speed: 2 + Math.random() * 2,
-                color: '#ff0000'
-            });
+            const settings = difficultySettings[currentDifficulty];
+            
+            if (enemies.length >= settings.maxEnemies) return;
+            
+            for (let i = 0; i < settings.enemySpawnCount; i++) {
+                const speed = settings.enemySpeed.min + Math.random() * (settings.enemySpeed.max - settings.enemySpeed.min);
+                enemies.push({
+                    x: Math.random() * (canvas.width - 30),
+                    y: -30,
+                    width: 30,
+                    height: 30,
+                    speed: speed,
+                    color: '#ff0000'
+                });
+            }
         }
         
         // パーティクルを生成
@@ -178,6 +371,8 @@
         // ゲーム更新
         function update() {
             if (gameState !== 'playing') return;
+            
+            const settings = difficultySettings[currentDifficulty];
             
             // プレイヤー移動
             if (keys['ArrowLeft'] && player.x > 0) {
@@ -249,7 +444,7 @@
             
             // 敵の生成
             enemySpawnTimer++;
-            if (enemySpawnTimer > 60) {
+            if (enemySpawnTimer >= settings.enemySpawnRate) {
                 spawnEnemy();
                 enemySpawnTimer = 0;
             }
@@ -269,66 +464,61 @@
                 ctx.fillRect(x, y, 1, 1);
             }
             
-            // プレイヤーの描画
-            ctx.fillStyle = '#00aaff';
-            ctx.fillRect(player.x, player.y, player.width, player.height);
-            
-            // プレイヤーの詳細
-            ctx.fillStyle = '#ffffff';
-            ctx.fillRect(player.x + 5, player.y + 5, 30, 10);
-            ctx.fillRect(player.x + 15, player.y - 5, 10, 10);
-            
-            // 弾の描画
-            bullets.forEach(bullet => {
-                ctx.fillStyle = bullet.color;
-                ctx.fillRect(bullet.x, bullet.y, bullet.width, bullet.height);
-            });
-            
-            // 敵の描画
-            enemies.forEach(enemy => {
-                ctx.fillStyle = enemy.color;
-                ctx.fillRect(enemy.x, enemy.y, enemy.width, enemy.height);
+            if (gameState === 'playing') {
+                // プレイヤーの描画
+                ctx.fillStyle = '#00aaff';
+                ctx.fillRect(player.x, player.y, player.width, player.height);
                 
-                // 敵の詳細
-                ctx.fillStyle = '#ff8800';
-                ctx.fillRect(enemy.x + 5, enemy.y + 5, 20, 10);
-                ctx.fillRect(enemy.x + 10, enemy.y + 20, 10, 8);
-            });
-            
-            // パーティクルの描画
-            particles.forEach(particle => {
-                ctx.fillStyle = particle.color;
-                ctx.globalAlpha = particle.life / 30;
-                ctx.fillRect(particle.x, particle.y, 3, 3);
-                ctx.globalAlpha = 1;
-            });
+                // プレイヤーの詳細
+                ctx.fillStyle = '#ffffff';
+                ctx.fillRect(player.x + 5, player.y + 5, 30, 10);
+                ctx.fillRect(player.x + 15, player.y - 5, 10, 10);
+                
+                // 弾の描画
+                bullets.forEach(bullet => {
+                    ctx.fillStyle = bullet.color;
+                    ctx.fillRect(bullet.x, bullet.y, bullet.width, bullet.height);
+                });
+                
+                // 敵の描画
+                enemies.forEach(enemy => {
+                    ctx.fillStyle = enemy.color;
+                    ctx.fillRect(enemy.x, enemy.y, enemy.width, enemy.height);
+                    
+                    // 敵の詳細
+                    ctx.fillStyle = '#ff8800';
+                    ctx.fillRect(enemy.x + 5, enemy.y + 5, 20, 10);
+                    ctx.fillRect(enemy.x + 10, enemy.y + 20, 10, 8);
+                });
+                
+                // パーティクルの描画
+                particles.forEach(particle => {
+                    ctx.fillStyle = particle.color;
+                    ctx.globalAlpha = particle.life / 30;
+                    ctx.fillRect(particle.x, particle.y, 3, 3);
+                    ctx.globalAlpha = 1;
+                });
+            }
         }
         
         // UI更新
         function updateUI() {
             document.getElementById('score').textContent = score;
             document.getElementById('lives').textContent = lives;
+            document.getElementById('currentDifficulty').textContent = difficultySettings[currentDifficulty].name;
         }
         
         // ゲームオーバー表示
         function showGameOver() {
             document.getElementById('finalScore').textContent = score;
+            document.getElementById('finalDifficulty').textContent = difficultySettings[currentDifficulty].name;
             document.getElementById('gameOver').style.display = 'block';
+            stopBGM();
         }
         
         // ゲームリスタート
         function restartGame() {
-            gameState = 'playing';
-            score = 0;
-            lives = 3;
-            bullets = [];
-            enemies = [];
-            particles = [];
-            enemySpawnTimer = 0;
-            player.x = canvas.width / 2;
-            player.y = canvas.height - 50;
-            document.getElementById('gameOver').style.display = 'none';
-            updateUI();
+            startGame(currentDifficulty);
         }
         
         // ゲームループ
@@ -338,7 +528,7 @@
             requestAnimationFrame(gameLoop);
         }
         
-        // ゲーム開始
+        // 初期化
         updateUI();
         gameLoop();
     </script>
